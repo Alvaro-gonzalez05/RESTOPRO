@@ -68,6 +68,10 @@ export interface DashboardStats {
   revenueToday: number
   newCustomers: number
   totalProducts: number
+  totalSuppliers: number
+  monthlyExpenses: number
+  monthlyRevenue: number
+  realProfitMonth: number
 }
 
 export interface PaymentMethod {

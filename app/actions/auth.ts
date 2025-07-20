@@ -53,9 +53,10 @@ export async function registerAction(prevState: any, formData: any) {
     }
 
     // Verificar si el usuario ya existe
-    const existingUsers = await sql`
-      SELECT id FROM users WHERE email = ${email.toLowerCase()}
-    `
+    const existingUsers = await sql(
+      `SELECT id FROM users WHERE email = $1`,
+      [email.toLowerCase()]
+    )
 
     if (existingUsers.length > 0) {
       return { error: "El email ya está registrado" }
@@ -63,11 +64,12 @@ export async function registerAction(prevState: any, formData: any) {
 
     // Crear nuevo usuario
     const hashedPassword = await hashPassword(password)
-    const newUsers = await sql`
-      INSERT INTO users (email, password_hash, restaurant_name, full_name, phone)
-      VALUES (${email.toLowerCase()}, ${hashedPassword}, ${restaurantName.trim()}, ${fullName.trim()}, ${phone.trim()})
-      RETURNING id
-    `
+    const newUsers = await sql(
+      `INSERT INTO users (email, password_hash, restaurant_name, full_name, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [email.toLowerCase(), hashedPassword, restaurantName.trim(), fullName.trim(), phone.trim()]
+    )
 
     const userId = newUsers[0].id
     console.log("User created successfully with ID:", userId)
@@ -113,9 +115,10 @@ export async function loginAction(prevState: any, formData: any) {
       return { error: "Por favor ingresa un email válido" }
     }
 
-    const users = await sql`
-      SELECT id, password_hash FROM users WHERE email = ${email.toLowerCase()}
-    `
+    const users = await sql(
+      `SELECT id, password_hash FROM users WHERE email = $1`,
+      [email.toLowerCase()]
+    )
 
     if (users.length === 0) {
       return { error: "Credenciales inválidas" }

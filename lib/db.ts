@@ -1,12 +1,35 @@
-import { neon } from "@neondatabase/serverless"
+import pg from 'pg'
+const { Pool } = pg
 
 // Use the provided DATABASE_URL or fallback to environment variable
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  "postgres://neondb_owner:npg_iDefZaSH83dB@ep-green-tree-adyy0bos-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
+const DATABASE_URL = process.env.DATABASE_URL
 
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is not set")
 }
 
-export const sql = neon(DATABASE_URL)
+// Desactivar verificación SSL para desarrollo
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+}
+
+// Create a connection pool
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: true
+  } : {
+    rejectUnauthorized: false
+  }
+})
+
+// Function to execute SQL queries compatible with Neon's interface
+export const sql = async (query: string, params?: any[]) => {
+  const client = await pool.connect()
+  try {
+    const result = await client.query(query, params)
+    return result.rows
+  } finally {
+    client.release()
+  }
+}

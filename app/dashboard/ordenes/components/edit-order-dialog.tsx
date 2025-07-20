@@ -438,7 +438,6 @@ interface OrderItem {
                       <SelectValue placeholder="Seleccionar método" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Sin especificar</SelectItem>
                       {paymentMethods.map((method) => (
                         <SelectItem key={method.id} value={method.id.toString()}>
                           {method.name}

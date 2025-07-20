@@ -37,172 +37,34 @@ export async function getReportData(period: 'daily' | 'weekly' | 'monthly' = 'da
     startDate.setDate(startDate.getDate() - daysBack)
     const startDateStr = startDate.toISOString().split('T')[0]
     
-    console.log('Reports fecha límite para Argentina:', startDateStr, 'Fecha actual Argentina:', argentinaDateStr)
-
     // Ventas por período - Query simplificada con zona horaria
-    const salesByPeriod = await sql`
-      SELECT 
-        DATE(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') as date,
-        COUNT(*) as orders,
-        COALESCE(SUM(total), 0) as sales
-      FROM orders 
-      WHERE user_id = ${user.id} 
-        AND created_at >= ${startDateStr}
-        AND status IN ('completado', 'entregado', 'pendiente')
-      GROUP BY DATE(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')
-      ORDER BY date DESC
-      LIMIT 20
-    `
+    const salesByPeriod = await sql(`SELECT DATE(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') as date, COUNT(*) as orders, COALESCE(SUM(total), 0) as sales FROM orders WHERE user_id = $1 AND created_at >= $2 AND status IN ('completado', 'entregado', 'pendiente') GROUP BY DATE(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') ORDER BY date DESC LIMIT 20`, [user.id, startDateStr])
     
     // Productos más vendidos - Query simplificada
-    const topProducts = await sql`
-      SELECT 
-        p.name,
-        SUM(oi.quantity) as quantity,
-        SUM(oi.total_price) as revenue
-      FROM order_items oi
-      JOIN products p ON oi.product_id = p.id
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.user_id = ${user.id} 
-        AND o.created_at >= ${startDateStr}
-        AND o.status IN ('completado', 'entregado', 'pendiente')
-      GROUP BY p.id, p.name
-      ORDER BY quantity DESC
-      LIMIT 10
-    `
+    const topProducts = await sql(`SELECT p.name, SUM(oi.quantity) as quantity, SUM(oi.total_price) as revenue FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN orders o ON oi.order_id = o.id WHERE o.user_id = $1 AND o.created_at >= $2 AND o.status IN ('completado', 'entregado', 'pendiente') GROUP BY p.id, p.name ORDER BY quantity DESC LIMIT 10`, [user.id, startDateStr])
     
     // Ticket promedio
-    const avgTicketResult = await sql`
-      SELECT COALESCE(AVG(total), 0) as average_ticket
-      FROM orders 
-      WHERE user_id = ${user.id} 
-        AND created_at >= ${startDateStr}
-        AND status IN ('completado', 'entregado', 'pendiente')
-    `
+    const avgTicketResult = await sql(`SELECT COALESCE(AVG(total), 0) as average_ticket FROM orders WHERE user_id = $1 AND created_at >= $2 AND status IN ('completado', 'entregado', 'pendiente')`, [user.id, startDateStr])
     
     // Horas pico - Query simplificada con zona horaria
-    const peakHours = await sql`
-      SELECT 
-        EXTRACT(hour FROM created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::integer as hour,
-        COUNT(*) as orders
-      FROM orders 
-      WHERE user_id = ${user.id} 
-        AND created_at >= ${startDateStr}
-        AND status IN ('completado', 'entregado', 'pendiente')
-      GROUP BY EXTRACT(hour FROM created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')
-      ORDER BY orders DESC
-    `
+    const peakHours = await sql(`SELECT EXTRACT(hour FROM created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::integer as hour, COUNT(*) as orders FROM orders WHERE user_id = $1 AND created_at >= $2 AND status IN ('completado', 'entregado', 'pendiente') GROUP BY EXTRACT(hour FROM created_at AT TIME ZONE 'America/Argentina/Buenos_Aires') ORDER BY orders DESC`, [user.id, startDateStr])
     
     // Métodos de pago por período - Query mejorada con datos reales
     let paymentMethodsQuery
     
     if (period === 'weekly') {
-      paymentMethodsQuery = sql`
-        SELECT 
-          TO_CHAR(DATE_TRUNC('week', created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'), 'YYYY-"W"WW') as period,
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END as method,
-          COUNT(*) as count,
-          SUM(o.total) as amount
-        FROM orders o
-        LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id
-        WHERE o.user_id = ${user.id} 
-          AND o.created_at >= ${startDateStr}
-          AND o.status IN ('completado', 'entregado', 'pendiente')
-        GROUP BY 
-          TO_CHAR(DATE_TRUNC('week', created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'), 'YYYY-"W"WW'),
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END
-        ORDER BY period DESC, amount DESC
-      `
+      paymentMethodsQuery = sql(`SELECT TO_CHAR(DATE_TRUNC('week', o.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'), 'YYYY-"W"WW') as period, CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END as method, COUNT(*) as count, SUM(o.total) as amount FROM orders o LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id WHERE o.user_id = $1 AND o.created_at >= $2 AND o.status IN ('completado', 'entregado', 'pendiente') GROUP BY TO_CHAR(DATE_TRUNC('week', o.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'), 'YYYY-"W"WW'), CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END ORDER BY period DESC, amount DESC`, [user.id, startDateStr])
     } else if (period === 'monthly') {
-      paymentMethodsQuery = sql`
-        SELECT 
-          TO_CHAR(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as period,
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END as method,
-          COUNT(*) as count,
-          SUM(o.total) as amount
-        FROM orders o
-        LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id
-        WHERE o.user_id = ${user.id} 
-          AND o.created_at >= ${startDateStr}
-          AND o.status IN ('completado', 'entregado', 'pendiente')
-        GROUP BY 
-          TO_CHAR(created_at AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM'),
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END
-        ORDER BY period DESC, amount DESC
-      `
+      paymentMethodsQuery = sql(`SELECT TO_CHAR(o.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM') as period, CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END as method, COUNT(*) as count, SUM(o.total) as amount FROM orders o LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id WHERE o.user_id = $1 AND o.created_at >= $2 AND o.status IN ('completado', 'entregado', 'pendiente') GROUP BY TO_CHAR(o.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM'), CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END ORDER BY period DESC, amount DESC`, [user.id, startDateStr])
     } else {
       // Período diario - mantener la lógica original pero agrupado
-      paymentMethodsQuery = sql`
-        SELECT 
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END as method,
-          COUNT(*) as count,
-          SUM(o.total) as amount
-        FROM orders o
-        LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id
-        WHERE o.user_id = ${user.id} 
-          AND o.created_at >= ${startDateStr}
-          AND o.status IN ('completado', 'entregado', 'pendiente')
-        GROUP BY 
-          CASE 
-            WHEN o.payment_method_id IS NOT NULL THEN pm.name
-            WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name
-            ELSE 'Efectivo'
-          END
-        ORDER BY amount DESC
-      `
+      paymentMethodsQuery = sql(`SELECT CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END as method, COUNT(*) as count, SUM(o.total) as amount FROM orders o LEFT JOIN payment_methods pm ON o.payment_method_id = pm.id WHERE o.user_id = $1 AND o.created_at >= $2 AND o.status IN ('completado', 'entregado', 'pendiente') GROUP BY CASE WHEN o.payment_method_id IS NOT NULL THEN pm.name WHEN o.payment_method_name IS NOT NULL THEN o.payment_method_name ELSE 'Efectivo' END ORDER BY amount DESC`, [user.id, startDateStr])
     }
     
     const paymentMethodsData = await paymentMethodsQuery
     
-    console.log('🔍 Payment methods raw data:', {
-      period,
-      dataLength: paymentMethodsData.length,
-      rawData: paymentMethodsData,
-      query: period
-    })
-    
     // Debug: ver todas las órdenes recientes sin filtrar por status
-    const debugOrders = await sql`
-      SELECT 
-        id,
-        status,
-        total,
-        payment_method_id,
-        payment_method_name,
-        created_at,
-        CASE 
-          WHEN payment_method_id IS NOT NULL THEN (SELECT name FROM payment_methods WHERE id = payment_method_id)
-          WHEN payment_method_name IS NOT NULL THEN payment_method_name
-          ELSE 'Efectivo'
-        END as resolved_method
-      FROM orders 
-      WHERE user_id = ${user.id} 
-        AND created_at >= NOW() - INTERVAL '1 day'
-      ORDER BY created_at DESC
-      LIMIT 10
-    `
-    
-    console.log('🔍 Debug - Recent orders (last 24h):', debugOrders)
+    const debugOrders = await sql(`SELECT id, status, total, payment_method_id, payment_method_name, created_at, CASE WHEN payment_method_id IS NOT NULL THEN (SELECT name FROM payment_methods WHERE id = payment_method_id) WHEN payment_method_name IS NOT NULL THEN payment_method_name ELSE 'Efectivo' END as resolved_method FROM orders WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '1 day' ORDER BY created_at DESC LIMIT 10`, [user.id])
     
     // Procesar datos de métodos de pago según el período
     let paymentMethods
@@ -248,13 +110,6 @@ export async function getReportData(period: 'daily' | 'weekly' | 'monthly' = 'da
         percentage: 100
       })
     }
-    
-    console.log('🔍 Payment methods processing:', {
-      period,
-      rawData: paymentMethodsData.length,
-      processedMethods: paymentMethods.length,
-      methods: paymentMethods.map(p => `${p.method}: $${p.amount}`)
-    })
     
     return {
       salesByPeriod: salesByPeriod.map(item => ({

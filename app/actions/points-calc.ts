@@ -9,7 +9,7 @@ export async function calculateOrderPoints({ customer_id, items, total }: { cust
   const userId = user.id;
   if (!customer_id) return 0;
   // Obtener configuración de puntos
-  const configs = await sql`SELECT * FROM points_config WHERE user_id = ${userId}`;
+  const configs = await sql(`SELECT * FROM points_config WHERE user_id = $1`, [userId]);
   let points = 0;
   // Puntos por producto
   for (const item of items) {
@@ -37,6 +37,6 @@ export async function calculateOrderPoints({ customer_id, items, total }: { cust
 export async function getCustomerPoints(customer_id: number) {
   const user = await requireAuth();
   const userId = user.id;
-  const [customer] = await sql`SELECT points FROM customers WHERE id = ${customer_id} AND user_id = ${userId}`;
+  const [customer] = await sql(`SELECT points FROM customers WHERE id = $1 AND user_id = $2`, [customer_id, userId]);
   return customer?.points || 0;
 }

@@ -1,36 +1,50 @@
 "use server"
 
-import { neon } from "@neondatabase/serverless"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { requireAuth } from "@/lib/auth"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { sql } from "@/lib/db"
 
 export async function getOrders() {
   try {
-    const orders = await sql`
+    const orders = await sql(`
       SELECT 
-        o.*,
+        o.id,
+        o.user_id,
+        o.customer_id,
+        o.customer_name,
+        o.table_number,
+        o.total,
+        o.notes,
+        o.status,
+        o.payment_method_id,
+        o.payment_method_name,
+        o.created_at,
+        o.updated_at,
         json_agg(
-          json_build_object(
-            'product_id', oi.product_id,
-            'product_name', oi.product_name,
-            'quantity', oi.quantity,
-            'unit_price', oi.unit_price,
-            'total_price', oi.total_price,
-            'category_id', oi.category_id
-          )
+          CASE 
+            WHEN oi.product_id IS NOT NULL THEN
+              json_build_object(
+                'product_id', oi.product_id,
+                'product_name', oi.product_name,
+                'quantity', oi.quantity,
+                'unit_price', oi.unit_price,
+                'total_price', oi.total_price,
+                'category_id', oi.category_id,
+                'redeemed_quantity', COALESCE(oi.redeemed_quantity, 0)
+              )
+            ELSE NULL
+          END
         ) as items
-      FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      GROUP BY o.id
+      FROM orders o 
+      LEFT JOIN order_items oi ON o.id = oi.order_id 
+      GROUP BY o.id, o.user_id, o.customer_id, o.customer_name, o.table_number, o.total, o.notes, o.status, o.payment_method_id, o.payment_method_name, o.created_at, o.updated_at
       ORDER BY o.created_at DESC
-    `
+    `)
 
     return orders.map((order) => ({
       ...order,
-      items: order.items?.[0]?.product_name ? order.items : [],
+      items: order.items?.[0] ? order.items.filter((item: any) => item !== null) : [],
     }))
   } catch (error) {
     console.error("Error fetching orders:", error)
@@ -57,18 +71,11 @@ export async function createOrder(formData: FormData) {
 
     // Create order
     const customerId = formData.get("customerId") ? Number(formData.get("customerId")) : null;
-    const [order] = await sql`
-      INSERT INTO orders (user_id, customer_id, customer_name, table_number, total, notes, status, payment_method_name, created_at)
-      VALUES (${userId}, ${customerId}, ${customerName}, ${tableNumber || null}, ${total}, ${notes || null}, 'pendiente', ${paymentMethod || 'Efectivo'}, NOW())
-      RETURNING id
-    `;
+    const [order] = await sql(`INSERT INTO orders (user_id, customer_id, customer_name, table_number, total, notes, status, payment_method_name, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', $7, NOW()) RETURNING id`, [userId, customerId, customerName, tableNumber || null, total, notes || null, paymentMethod || 'Efectivo']);
 
     // Create order items (guardar category_id)
     for (const item of items) {
-      await sql`
-        INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, total_price, category_id)
-        VALUES (${order.id}, ${item.product_id}, ${item.product_name}, ${item.quantity}, ${item.unit_price}, ${item.total_price}, ${item.category_id || null})
-      `;
+      await sql(`INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, total_price, category_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [order.id, item.product_id, item.product_name, item.quantity, item.unit_price, item.total_price, item.category_id || null]);
     }
 
     revalidatePath("/dashboard/ordenes");
@@ -86,11 +93,7 @@ export async function updateOrderStatus(orderId: number, status: string, payment
     // Si se está completando la orden y no se especifica método de pago
     if ((status === "completado" || status === "entregado") && !paymentMethod) {
       // Verificar si la orden ya tiene un método de pago
-      const [existingOrder] = await sql`
-        SELECT payment_method_name, payment_method_id
-        FROM orders 
-        WHERE id = ${orderId}
-      `
+      const [existingOrder] = await sql(`SELECT payment_method_name, payment_method_id FROM orders WHERE id = $1`, [orderId])
       
       // Si no tiene método de pago, asignar "Efectivo" por defecto
       if (!existingOrder.payment_method_name && !existingOrder.payment_method_id) {
@@ -100,28 +103,20 @@ export async function updateOrderStatus(orderId: number, status: string, payment
 
     // Si se proporciona un método de pago, actualizarlo también
     if (paymentMethod) {
-      await sql`
-        UPDATE orders 
-        SET status = ${status}, payment_method_name = ${paymentMethod}, updated_at = NOW()
-        WHERE id = ${orderId}
-      `
+      await sql(`UPDATE orders SET status = $1, payment_method_name = $2, updated_at = NOW() WHERE id = $3`, [status, paymentMethod, orderId])
       console.log(`🔍 Order ${orderId} updated with status: ${status}, payment method: ${paymentMethod}`)
     } else {
-      await sql`
-        UPDATE orders 
-        SET status = ${status}, updated_at = NOW()
-        WHERE id = ${orderId}
-      `
+      await sql(`UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, [status, orderId])
       console.log(`🔍 Order ${orderId} updated with status: ${status} (no payment method change)`)
     }
 
     // Si la orden se completa o se paga, sumar puntos solo por productos no canjeados y restar puntos de productos canjeados
     if (status === "completado" || status === "pagada") {
       // Obtener datos de la orden y sus items
-      const [order] = await sql`SELECT * FROM orders WHERE id = ${orderId}`;
+      const [order] = await sql(`SELECT * FROM orders WHERE id = $1`, [orderId]);
       if (order && order.customer_id) {
         // Items no canjeados (solo la parte no canjeada de cada item)
-        const itemsRaw = await sql`SELECT product_id, quantity, category_id, unit_price, total_price, COALESCE(redeemed_quantity,0) as redeemed_quantity FROM order_items WHERE order_id = ${orderId}`;
+        const itemsRaw = await sql(`SELECT product_id, quantity, category_id, unit_price, total_price, COALESCE(redeemed_quantity,0) as redeemed_quantity FROM order_items WHERE order_id = $1`, [orderId]);
         const items = itemsRaw.map((i: any) => ({
           product_id: Number(i.product_id),
           quantity: Number(i.quantity) - Number(i.redeemed_quantity || 0),
@@ -135,16 +130,16 @@ export async function updateOrderStatus(orderId: number, status: string, payment
           total: order.total
         });
         // Sumar puntos por productos no canjeados
-        await sql`UPDATE customers SET points = COALESCE(points,0) + ${points} WHERE id = ${order.customer_id}`;
+        await sql(`UPDATE customers SET points = COALESCE(points,0) + $1 WHERE id = $2`, [points, order.customer_id]);
 
         // Restar puntos por productos canjeados (solo si redeemed_quantity > 0)
         for (const item of itemsRaw) {
           const redeemedQty = Number(item.redeemed_quantity || 0);
           if (redeemedQty > 0) {
-            const [config] = await sql`SELECT redeem_points FROM points_config WHERE product_id = ${item.product_id}`;
+            const [config] = await sql(`SELECT redeem_points FROM points_config WHERE product_id = $1`, [item.product_id]);
             if (config && config.redeem_points) {
               const totalRedeem = config.redeem_points * redeemedQty;
-              await sql`UPDATE customers SET points = GREATEST(COALESCE(points,0) - ${totalRedeem}, 0) WHERE id = ${order.customer_id}`;
+              await sql(`UPDATE customers SET points = GREATEST(COALESCE(points,0) - $1, 0) WHERE id = $2`, [totalRedeem, order.customer_id]);
             }
           }
         }
@@ -163,10 +158,10 @@ export async function updateOrderStatus(orderId: number, status: string, payment
 export async function deleteOrder(orderId: number) {
   try {
     // Delete order items first
-    await sql`DELETE FROM order_items WHERE order_id = ${orderId}`
+    await sql(`DELETE FROM order_items WHERE order_id = $1`, [orderId])
 
     // Delete order
-    await sql`DELETE FROM orders WHERE id = ${orderId}`
+    await sql(`DELETE FROM orders WHERE id = $1`, [orderId])
 
     revalidatePath("/dashboard/ordenes")
     return { success: true }
@@ -179,10 +174,10 @@ export async function deleteOrder(orderId: number) {
 export async function deleteAllOrders() {
   try {
     // Delete all order items first
-    await sql`DELETE FROM order_items`
+    await sql(`DELETE FROM order_items`)
 
     // Delete all orders
-    await sql`DELETE FROM orders`
+    await sql(`DELETE FROM orders`)
 
     revalidatePath("/dashboard/ordenes")
     redirect("/dashboard/ordenes")
@@ -194,18 +189,12 @@ export async function deleteAllOrders() {
 
 export async function completeOrderWithPayment(orderId: number, paymentMethod: string) {
   try {
-    await sql`
-      UPDATE orders 
-      SET status = 'completado', payment_method_name = ${paymentMethod}, updated_at = NOW()
-      WHERE id = ${orderId}
-    `
-    
-    console.log(`🔍 Order ${orderId} completed with payment method: ${paymentMethod}`)
+    await sql(`UPDATE orders SET status = 'completado', payment_method_name = $1, updated_at = NOW() WHERE id = $2`, [paymentMethod, orderId])
     
     // Ejecutar la lógica de puntos como en updateOrderStatus
-    const [order] = await sql`SELECT * FROM orders WHERE id = ${orderId}`;
+    const [order] = await sql(`SELECT * FROM orders WHERE id = $1`, [orderId]);
     if (order && order.customer_id) {
-      const itemsRaw = await sql`SELECT product_id, quantity, category_id, unit_price, total_price, COALESCE(redeemed_quantity,0) as redeemed_quantity FROM order_items WHERE order_id = ${orderId}`;
+      const itemsRaw = await sql(`SELECT product_id, quantity, category_id, unit_price, total_price, COALESCE(redeemed_quantity,0) as redeemed_quantity FROM order_items WHERE order_id = $1`, [orderId]);
       const items = itemsRaw.map((i: any) => ({
         product_id: Number(i.product_id),
         quantity: Number(i.quantity) - Number(i.redeemed_quantity || 0),
@@ -248,15 +237,8 @@ export async function completeOrderWithPayment(orderId: number, paymentMethod: s
 // Función para actualizar órdenes existentes sin método de pago
 export async function updateExistingOrdersPaymentMethod() {
   try {
-    const result = await sql`
-      UPDATE orders 
-      SET payment_method_name = 'Efectivo' 
-      WHERE payment_method_name IS NULL 
-        AND payment_method_id IS NULL 
-        AND status IN ('completado', 'entregado')
-    `
+    const result = await sql(`UPDATE orders SET payment_method_name = 'Efectivo' WHERE payment_method_name IS NULL AND payment_method_id IS NULL AND status IN ('completado', 'entregado')`)
     
-    console.log('🔍 Updated existing orders without payment method:', result)
     return { success: true, updatedCount: result.length || 0 }
   } catch (error) {
     console.error("Error updating existing orders:", error)

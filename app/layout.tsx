@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "RestoPro - Sistema de Gestión de Restaurante",
   description: "Sistema completo de gestión para restaurantes",
-    generator: 'v0.dev'
+    generator: 'CODEA DESARROLLOS'
 }
 
 export default function RootLayout({

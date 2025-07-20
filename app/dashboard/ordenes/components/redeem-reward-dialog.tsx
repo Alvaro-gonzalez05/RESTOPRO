@@ -6,7 +6,6 @@ import { Loader2 } from "lucide-react"
 // Usar fetch a /api/rewards en vez de importar server actions
 import { toast } from "sonner"
 
-// ...existing code...
 interface RedeemRewardDialogProps {
   customerId: number;
   orderId: number;
@@ -79,8 +78,10 @@ export default function RedeemRewardDialog({ customerId, orderId, onRedeem, rede
       setLoading(false);
     }
   };
-  // (declaraciones de estado, efectos, funciones auxiliares, etc.)
-  // ...existing code...
+  // Filtrar productos canjeables: solo redeem_points > 0 y sin duplicados
+  const canjeables = products
+    .filter(p => p.redeem_points > 0)
+    .filter((p, idx, arr) => arr.findIndex(x => x.id === p.id) === idx);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -102,7 +103,7 @@ export default function RedeemRewardDialog({ customerId, orderId, onRedeem, rede
               </li>
             ) : (
               <>
-                {products.map(p => {
+                {canjeables.map(p => {
                   // Calcular máximo canjeable según puntos y cantidad en la orden
                   const orderItem = orderItems.find(oi => oi.product_id === p.id);
                   const prev = redeemedProducts.find(rp => rp.product_id === p.id);
@@ -134,7 +135,7 @@ export default function RedeemRewardDialog({ customerId, orderId, onRedeem, rede
                     </li>
                   );
                 })}
-                {products.length === 0 && <li className="text-xs text-gray-400">No hay productos canjeables.</li>}
+                {canjeables.length === 0 && <li className="text-xs text-gray-400">No hay productos canjeables.</li>}
               </>
             )}
           </ul>

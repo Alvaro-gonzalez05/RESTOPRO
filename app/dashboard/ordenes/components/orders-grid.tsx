@@ -89,16 +89,21 @@ export function OrdersGrid({ orders, searchTerm = "", onOrdersChanged }: OrdersG
   }
 
   const handleStatusUpdate = async (orderId: number, newStatus: string) => {
+    console.log(`🔍 handleStatusUpdate called: orderId=${orderId}, newStatus=${newStatus}`)
+    
     // Si se está completando la orden, mostrar diálogo de método de pago
     if (newStatus === "completado") {
       const order = orders.find(o => o.id === orderId)
+      console.log(`🔍 Found order for completion:`, order)
       if (order) {
+        console.log(`🔍 Opening payment dialog for order ${orderId}`)
         setOrderToComplete(order)
         setPaymentDialogOpen(true)
         return
       }
     }
 
+    console.log(`🔍 Updating order status directly: ${orderId} -> ${newStatus}`)
     setLoadingOrders((prev) => new Set(prev).add(orderId))
     try {
       await updateOrderStatus(orderId, newStatus)
@@ -114,12 +119,15 @@ export function OrdersGrid({ orders, searchTerm = "", onOrdersChanged }: OrdersG
   const handleCompleteOrderWithPayment = async () => {
     if (!orderToComplete) return
     
+    console.log(`🔍 Completing order ${orderToComplete.id} with payment method: ${selectedPaymentMethod}`)
+    
     setLoadingOrders((prev) => new Set(prev).add(orderToComplete.id))
     try {
       await completeOrderWithPayment(orderToComplete.id, selectedPaymentMethod)
       setPaymentDialogOpen(false)
       setOrderToComplete(null)
       setSelectedPaymentMethod("Efectivo")
+      console.log(`🔍 Order ${orderToComplete.id} completed successfully`)
     } finally {
       setLoadingOrders((prev) => {
         const newSet = new Set(prev)
@@ -178,8 +186,19 @@ export function OrdersGrid({ orders, searchTerm = "", onOrdersChanged }: OrdersG
 
   // Handler for process payment
   const handleProcessPayment = async (order: Order, paymentMethod: string) => {
-    await handleDrawerStatusChange(order.id, "completado")
-    setDrawerOpen(false)
+    setLoadingOrders((prev) => new Set(prev).add(order.id))
+    try {
+      await completeOrderWithPayment(order.id, paymentMethod)
+      setDrawerOpen(false)
+    } catch (error) {
+      console.error("Error processing payment:", error)
+    } finally {
+      setLoadingOrders((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(order.id)
+        return newSet
+      })
+    }
   }
 
   // Filtrado por búsqueda

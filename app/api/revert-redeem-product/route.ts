@@ -8,6 +8,6 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "Faltan datos" }), { status: 400 });
   }
   // Restar la cantidad canjeada en redeemed_quantity
-  await sql`UPDATE order_items SET redeemed_quantity = GREATEST(COALESCE(redeemed_quantity,0) - ${quantity}, 0) WHERE order_id = ${order_id} AND product_id = ${product_id}`;
+  await sql(`UPDATE order_items SET redeemed_quantity = GREATEST(COALESCE(redeemed_quantity,0) - $1, 0) WHERE order_id = $2 AND product_id = $3`, [quantity, order_id, product_id]);
   return new Response(JSON.stringify({ success: true }), { status: 200 });
 }

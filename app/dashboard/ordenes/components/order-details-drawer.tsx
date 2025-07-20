@@ -78,6 +78,7 @@ export function OrderDetailsDrawer({ order, open, onClose, onStatusChange, onEdi
           <div>
             <label className="block text-sm font-medium mb-1">Estado del pedido</label>
             <Select value={status} onValueChange={(value: Order["status"]) => {
+              console.log("🔄 [OrderDetailsDrawer] Status change requested:", { orderId: order.id, newStatus: value, currentStatus: order.status })
               setStatus(value)
               onStatusChange(order.id, value)
             }}>
@@ -145,6 +146,7 @@ export function OrderDetailsDrawer({ order, open, onClose, onStatusChange, onEdi
               <div className="mt-4 flex justify-end">
                 <RedeemRewardDialog
                   customerId={order.customer_id}
+                  orderId={order.id}
                   redeemedProducts={redeemedProducts}
                   setRedeemedProducts={setRedeemedProducts}
                   orderItems={order.items || []}

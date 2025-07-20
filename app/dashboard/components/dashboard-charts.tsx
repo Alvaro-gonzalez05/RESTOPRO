@@ -10,6 +10,8 @@ import {
   ChartTooltip, 
   ChartTooltipContent
 } from "@/components/ui/chart"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
 import { 
   BarChart, 
   Bar, 
@@ -501,7 +503,7 @@ export function DashboardCharts() {
           </CardContent>
         </Card>
 
-        {/* Productos más vendidos - BarChart */}
+        {/* Productos más vendidos - Tabla */}
         <Card>
           <CardHeader className="flex flex-row items-center space-y-0 pb-2">
             <div className="flex items-center space-x-2">
@@ -511,71 +513,84 @@ export function DashboardCharts() {
           </CardHeader>
           <CardContent>
             {(() => {
-              // Usar datos de reportes si están disponibles
+              // Usar únicamente datos reales de la base de datos
               let productData = reportData?.topProducts || []
               
-              // Si no hay datos de reportes, generar datos de ejemplo basados en dashboard
-              if (productData.length === 0 && dashboardStats && dashboardStats.ordersToday > 0) {
-                const avgPerProduct = Math.max(2, Math.floor(dashboardStats.ordersToday / 5))
-                productData = [
-                  { name: 'Pizza Margherita', quantity: avgPerProduct + 5, revenue: (avgPerProduct + 5) * 15 },
-                  { name: 'Hamburguesa Clásica', quantity: avgPerProduct + 3, revenue: (avgPerProduct + 3) * 12 },
-                  { name: 'Ensalada César', quantity: avgPerProduct + 1, revenue: (avgPerProduct + 1) * 8 },
-                  { name: 'Pasta Carbonara', quantity: Math.max(1, avgPerProduct - 1), revenue: Math.max(1, avgPerProduct - 1) * 14 },
-                  { name: 'Tacos al Pastor', quantity: Math.max(1, avgPerProduct - 2), revenue: Math.max(1, avgPerProduct - 2) * 10 }
-                ]
-              } else if (productData.length === 0) {
-                // Si no hay datos del dashboard, mostrar datos de ejemplo mínimos
-                productData = [
-                  { name: 'Pizza Margherita', quantity: 8, revenue: 120 },
-                  { name: 'Hamburguesa Clásica', quantity: 6, revenue: 72 },
-                  { name: 'Ensalada César', quantity: 4, revenue: 32 },
-                  { name: 'Pasta Carbonara', quantity: 3, revenue: 42 },
-                  { name: 'Tacos al Pastor', quantity: 2, revenue: 20 }
-                ]
+              // Filtrar productos que tienen datos válidos
+              productData = productData.filter(product => 
+                product.name && 
+                product.quantity > 0 && 
+                product.revenue > 0
+              )
+
+              const formatCurrency = (amount: number) => {
+                return new Intl.NumberFormat('es-CO', {
+                  style: 'currency',
+                  currency: 'COP',
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0
+                }).format(amount)
               }
               
               return productData.length > 0 ? (
-                <ChartContainer config={chartConfig} className="h-[300px] w-full">
-                  <BarChart 
-                    data={productData.slice(0, 5)} 
-                    width={400}
-                    height={300}
-                    margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="name" 
-                      tickLine={false}
-                      axisLine={false}
-                      fontSize={10}
-                      angle={-45}
-                      textAnchor="end"
-                      height={60}
-                      interval={0}
-                    />
-                    <YAxis 
-                      tickLine={false}
-                      axisLine={false}
-                      fontSize={11}
-                    />
-                    <ChartTooltip
-                      cursor={{ fill: 'rgba(0, 0, 0, 0.1)' }}
-                      content={<ChartTooltipContent 
-                        formatter={(value) => [value, 'Cantidad Vendida']}
-                      />}
-                    />
-                    <Bar 
-                      dataKey="quantity" 
-                      fill="#3b82f6" 
-                      radius={[4, 4, 0, 0]}
-                      maxBarSize={60}
-                    />
-                  </BarChart>
-                </ChartContainer>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <span className="text-sm text-gray-600">Productos del menú</span>
+                      <span className="text-sm font-medium text-gray-900">Ventas</span>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      Período: {formatPeriodLabel(period)}
+                    </Badge>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {productData.slice(0, 5).map((product, index) => (
+                      <div 
+                        key={product.name} 
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="flex items-center justify-center w-8 h-8 bg-blue-100 text-blue-600 rounded-full text-sm font-semibold">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-900 text-sm">
+                              {product.name}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="text-right">
+                          <div className="text-lg font-bold text-gray-900">
+                            {formatCurrency(product.revenue)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {product.quantity} {product.quantity === 1 ? 'vendido' : 'vendidos'}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {productData.length > 5 && (
+                    <div className="text-center pt-2">
+                      <button className="text-sm text-blue-600 hover:text-blue-800">
+                        Ver todos los productos
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-[300px] text-gray-500">
-                  <p>No hay datos de productos disponibles</p>
+                  <div className="text-center">
+                    <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>No hay datos de productos disponibles</p>
+                    <p className="text-sm">Los productos aparecerán cuando realices ventas</p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      Período: {formatPeriodLabel(period)}
+                    </p>
+                  </div>
                 </div>
               )
             })()}

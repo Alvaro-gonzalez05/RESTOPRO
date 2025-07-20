@@ -25,11 +25,12 @@ export async function getCurrentUser(): Promise<User | null> {
     const userId = cookieStore.get("user_id")?.value
     if (!userId) return null
 
-    const result = await sql`
-      SELECT id, email, full_name, restaurant_name, created_at
-      FROM users 
-      WHERE id = ${Number(userId)}
-    `
+    const result = await sql(
+      `SELECT id, email, full_name, restaurant_name, created_at
+       FROM users 
+       WHERE id = $1`,
+      [Number(userId)]
+    )
 
     if (result.length === 0) return null
     return result[0] as User
@@ -45,4 +46,9 @@ export async function requireAuth(): Promise<User> {
     throw new Error("Authentication required")
   }
   return user
+}
+
+export function generateToken(userId: number): string {
+  // Simple token generation - en producción deberías usar JWT o algo más seguro
+  return Buffer.from(`${userId}:${Date.now()}`).toString('base64')
 }
