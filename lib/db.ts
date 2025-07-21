@@ -8,19 +8,10 @@ if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is not set")
 }
 
-// Desactivar verificación SSL para desarrollo
-if (process.env.NODE_ENV !== 'production') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-}
-
-// Create a connection pool
+// Create a connection pool with simplified SSL configuration
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? {
-    rejectUnauthorized: true
-  } : {
-    rejectUnauthorized: false
-  }
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 })
 
 // Function to execute SQL queries compatible with Neon's interface
