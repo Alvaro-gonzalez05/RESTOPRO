@@ -1,11 +1,11 @@
-
-
 import { redirect } from "next/navigation"
 import { getCurrentUser } from "@/lib/auth"
 import { LoginForm } from "./login-form"
 import { Utensils } from "lucide-react"
 import { headers } from "next/headers"
 
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
 
 export default async function LoginPage() {
   const user = await getCurrentUser()

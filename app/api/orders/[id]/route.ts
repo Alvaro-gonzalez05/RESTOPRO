@@ -3,6 +3,9 @@ import { sql } from "@/lib/db"
 import { cookies } from "next/headers"
 import { updateOrder, getOrderById } from "@/lib/orders"
 
+// Forzar renderizado dinámico para API routes
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const cookieStore = cookies()

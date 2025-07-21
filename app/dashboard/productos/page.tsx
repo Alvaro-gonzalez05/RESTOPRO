@@ -1,9 +1,10 @@
 import { getProducts, getCategories } from "@/app/actions/products"
-import dynamic from "next/dynamic"
+import dynamicImport from "next/dynamic"
 
-export const revalidate = 60;
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
 
-const ProductsPageContent = dynamic(() => import("./products-page-content"), { ssr: false })
+const ProductsPageContent = dynamicImport(() => import("./products-page-content"), { ssr: false })
 
 export default async function ProductsPage() {
   const [products, categories] = await Promise.all([

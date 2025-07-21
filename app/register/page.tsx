@@ -3,6 +3,9 @@ import { getCurrentUser } from "@/lib/auth"
 import { RegisterForm } from "./register-form"
 import { Utensils } from "lucide-react"
 
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
+
 export default async function RegisterPage() {
   const user = await getCurrentUser()
 

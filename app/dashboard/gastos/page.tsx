@@ -1,5 +1,8 @@
 "use client"
 
+// Forzar renderizado dinámico para evitar errores de build
+// export const dynamic = 'force-dynamic'
+
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"

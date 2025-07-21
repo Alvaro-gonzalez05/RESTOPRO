@@ -2,6 +2,9 @@ import type React from "react"
 import { Sidebar } from "./components/sidebar"
 import { requireAuth } from "@/lib/auth"
 
+// Forzar renderizado dinámico para autenticación
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardLayout({
   children,
 }: {

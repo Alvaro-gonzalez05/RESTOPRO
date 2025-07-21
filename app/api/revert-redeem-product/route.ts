@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server"
 import { sql } from "@/lib/db"
 
+// Forzar renderizado dinámico para API routes
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { order_id, product_id, quantity } = body;

@@ -6,6 +6,9 @@ import { RecentOrdersTable } from "./components/recent-orders-table"
 import { DashboardCharts } from "./components/dashboard-charts"
 import { QuickActionsMenu } from "./components/quick-actions-menu"
 
+// Forzar renderizado dinámico
+export const dynamic = 'force-dynamic'
+
 async function DashboardStats() {
   const stats = await getDashboardStats()
 

@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server"
 import { sql } from "@/lib/db"
 
+// Forzar renderizado dinámico para API routes
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const customer_id = searchParams.get("customer_id")

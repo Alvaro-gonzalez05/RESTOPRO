@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import Link from "next/link"
 import dynamic from "next/dynamic"
+
 const RewardsManager = dynamic(() => import("./components/rewards-manager"), { ssr: false })
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from "@/app/actions/customers"

@@ -4,6 +4,9 @@ import OrdersTabs from "./components/orders-tabs"
 import { Button } from "@/components/ui/button"
 import { RefreshCw, Trash2 } from "lucide-react"
 
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
+
 // Client component para tabs, búsqueda y grid
 export default async function OrdersPage() {
   const orders = await getOrders()

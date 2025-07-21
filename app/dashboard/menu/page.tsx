@@ -1,8 +1,8 @@
 import { getProducts, getCategories } from "@/app/actions/products"
 import { MenuInterface } from "./components/menu-interface"
 
-// Hacemos que la página sea un Server Component y cachee los datos por 60 segundos
-export const revalidate = 60;
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
 
 export default async function MenuPage() {
   const [products, categories] = await Promise.all([

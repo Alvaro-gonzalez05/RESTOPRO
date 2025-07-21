@@ -2,6 +2,9 @@ import { Suspense } from "react"
 import { getSuppliers } from "@/app/actions/suppliers"
 import { SuppliersTable } from "./components/suppliers-table"
 
+// Forzar renderizado dinámico para evitar errores de build
+export const dynamic = 'force-dynamic'
+
 async function SuppliersContent() {
   const suppliers = await getSuppliers()
   

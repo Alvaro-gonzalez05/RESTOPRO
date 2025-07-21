@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { getRewardOptions, createRewardOption, deleteRewardOption, redeemReward } from "@/lib/rewards"
 import { requireAuth } from "@/lib/auth"
 
+// Forzar renderizado dinámico para API routes
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth()
