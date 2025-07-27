@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, ShoppingCart, Menu, Package, Settings, LogOut, User, Utensils, Receipt, Truck } from "lucide-react"
+import { LayoutDashboard, ShoppingCart, Menu, Package, Settings, LogOut, User, Utensils, Receipt, Truck, MessageCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { logoutAction } from "@/app/actions/auth"
 import type { User as AdminUser } from "@/lib/types"
@@ -19,6 +19,7 @@ const navigation = [
   { name: "Clientes", href: "/dashboard/clientes", icon: User },
   { name: "Gastos", href: "/dashboard/gastos", icon: Receipt },
   { name: "Proveedores", href: "/dashboard/proveedores", icon: Truck },
+  { name: "Chatbot", href: "/dashboard/chatbot", icon: MessageCircle },
 ]
 
 export function Sidebar({ user }: SidebarProps) {

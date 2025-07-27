@@ -11,7 +11,7 @@ if (!DATABASE_URL) {
 // Create a connection pool with simplified SSL configuration
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: { rejectUnauthorized: false, ca: undefined }
 })
 
 // Function to execute SQL queries compatible with Neon's interface

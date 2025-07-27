@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { requireAuth } from "@/lib/auth"
 import { sql } from "@/lib/db"
+import { calculateOrderPoints } from "@/app/actions/points-calc"
+import { triggerAutomation } from "@/lib/automation-engine"
 
 export async function getOrders() {
   try {
@@ -62,6 +64,7 @@ export async function createOrder(formData: FormData) {
     const notes = formData.get("notes") as string;
     const itemsJson = formData.get("items") as string;
     const paymentMethod = formData.get("paymentMethod") as string;
+    const customerId = formData.get("customerId") ? Number(formData.get("customerId")) : null;
 
     if (!customerName || !itemsJson) {
       return { success: false, error: "Faltan datos requeridos" };
@@ -70,7 +73,6 @@ export async function createOrder(formData: FormData) {
     const items = JSON.parse(itemsJson);
 
     // Create order
-    const customerId = formData.get("customerId") ? Number(formData.get("customerId")) : null;
     const [order] = await sql(`INSERT INTO orders (user_id, customer_id, customer_name, table_number, total, notes, status, payment_method_name, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'pendiente', $7, NOW()) RETURNING id`, [userId, customerId, customerName, tableNumber || null, total, notes || null, paymentMethod || 'Efectivo']);
 
     // Create order items (guardar category_id)
@@ -79,14 +81,26 @@ export async function createOrder(formData: FormData) {
     }
 
     revalidatePath("/dashboard/ordenes");
+
+    // Trigger automation for new order
+    if (customerId) {
+      const [customer] = await sql(`SELECT phone FROM customers WHERE id = $1`, [customerId]);
+      if (customer?.phone) {
+        await triggerAutomation(userId, 'new_order', {
+          orderId: order.id,
+          customerName: customerName,
+          customerPhone: customer.phone,
+          total: total,
+        });
+      }
+    }
+
     return { success: true, orderId: order.id };
   } catch (error) {
     console.error("Error creating order:", error);
     return { success: false, error: "Error al crear el pedido" };
   }
 }
-
-import { calculateOrderPoints } from "@/app/actions/points-calc"
 
 export async function updateOrderStatus(orderId: number, status: string, paymentMethod?: string) {
   try {

@@ -1,0 +1,8 @@
+onlyBuiltDependencies:
+  - '@ffmpeg-installer/linux-x64'
+  - '@whiskeysockets/baileys'
+  - bufferutil
+  - protobufjs
+  - puppeteer
+  - sharp
+  - utf-8-validate
