@@ -44,50 +44,91 @@ export async function getCustomerByPhone(phone: string): Promise<CustomerData | 
   }
 }
 
+// Memoria en RAM para el historial de conversaciones (no persistente)
+const conversationHistory: { [phone: string]: { messages: { role: 'user' | 'model'; text: string }[], timestamp: number } } = {};
+
+// Buffer para mensajes entrantes (para agrupar mensajes rápidos)
+const messageBuffer: { [phone: string]: { messages: string[], timer: NodeJS.Timeout } } = {};
+
 // Procesar mensaje del cliente con IA
 export async function processIncomingMessage(userId: number, fromPhone: string, messageBody: string) {
-  try {
-    console.log('Processing message:', { userId, fromPhone, messageBody })
-    
-    // Obtener datos del cliente
-    const customer = await getCustomerByPhone(fromPhone)
-    console.log('Customer data:', customer)
-    
-    // Obtener configuración del chatbot
-    const [messages, businessInfo] = await Promise.all([
-      getActiveChatbotMessages(userId),
-      getBusinessInfo(userId)
-    ])
-    
-    console.log('Chatbot config loaded:', { 
-      messagesCount: messages.length, 
-      hasBusinessInfo: !!businessInfo 
-    })
-    
-    // Analizar el mensaje y generar respuesta
-    const aiResult = await generateAIResponse(messageBody, customer, messages, businessInfo)
-    
-    if (aiResult) {
-      const { response, hasOptions, options } = aiResult
-      
-      // Enviar respuesta automática (con o sin botones)
-      if (hasOptions && options && options.length > 0) {
-        await sendInteractiveMessage(userId, fromPhone.replace('whatsapp:', ''), response, options)
-      } else {
-        await sendMessage(userId, fromPhone.replace('whatsapp:', ''), response)
-      }
-      
-      // Registrar la interacción
-      await logChatbotInteraction(userId, fromPhone, messageBody, response)
-      
-      return { success: true, response: response }
+  const cleanPhone = fromPhone.replace(/whatsapp:|test-chat-widget/g, '');
+
+  // Limpiar historial antiguo
+  Object.keys(conversationHistory).forEach(phone => {
+    if (Date.now() - conversationHistory[phone].timestamp > 15 * 60 * 1000) { // 15 minutos
+      delete conversationHistory[phone];
     }
-    
-    return { success: false, error: 'No response generated' }
-  } catch (error) {
-    console.error('Error processing incoming message:', error)
-    return { success: false, error: String(error) }
+  });
+
+  // Agrupar mensajes que llegan muy rápido
+  if (messageBuffer[cleanPhone]) {
+    clearTimeout(messageBuffer[cleanPhone].timer);
+    messageBuffer[cleanPhone].messages.push(messageBody);
+  } else {
+    messageBuffer[cleanPhone] = {
+      messages: [messageBody],
+      timer: null as any
+    };
   }
+
+  return new Promise((resolve) => {
+    messageBuffer[cleanPhone].timer = setTimeout(async () => {
+      const fullMessage = messageBuffer[cleanPhone].messages.join(' \n ');
+      delete messageBuffer[cleanPhone];
+
+      try {
+        console.log('Processing message:', { userId, fromPhone, fullMessage });
+
+        // Obtener historial o inicializarlo
+        if (!conversationHistory[cleanPhone]) {
+          conversationHistory[cleanPhone] = { messages: [], timestamp: Date.now() };
+        }
+        conversationHistory[cleanPhone].messages.push({ role: 'user', text: fullMessage });
+        conversationHistory[cleanPhone].timestamp = Date.now();
+
+        const customer = await getCustomerByPhone(fromPhone);
+        const [businessInfo, botConfig] = await Promise.all([
+          getBusinessInfo(userId),
+          getUserBotConfig(userId)
+        ]);
+
+        console.log('DEBUG: Retrieved botConfig in processIncomingMessage:', JSON.stringify(botConfig, null, 2));
+
+        const aiResult = await generateAIResponse(
+          fullMessage, 
+          customer, 
+          businessInfo,
+          botConfig,
+          conversationHistory[cleanPhone].messages
+        );
+
+        if (aiResult) {
+          const { response, hasOptions, options } = aiResult;
+          
+          // Añadir respuesta del bot al historial
+          conversationHistory[cleanPhone].messages.push({ role: 'model', text: response });
+
+          if (fromPhone !== 'test-chat-widget') {
+            if (hasOptions && options && options.length > 0) {
+              await sendInteractiveMessage(userId, fromPhone.replace('whatsapp:', ''), response, options);
+            } else {
+              await sendMessage(userId, fromPhone.replace('whatsapp:', ''), response);
+            }
+          }
+          
+          await logChatbotInteraction(userId, fromPhone, fullMessage, response);
+          
+          resolve({ success: true, response: response });
+        } else {
+          resolve({ success: false, error: 'No response generated' });
+        }
+      } catch (error) {
+        console.error('Error processing incoming message:', error);
+        resolve({ success: false, error: String(error) });
+      }
+    }, 3000); // Esperar 3 segundos antes de procesar
+  });
 }
 
 // Obtener mensajes activos del chatbot
@@ -120,6 +161,63 @@ async function getBusinessInfo(userId: number) {
   }
 }
 
+async function getUserBotConfig(userId: number) {
+  try {
+    const result = await sql(`
+      SELECT bot_name, ai_role, ai_instructions, openai_api_key
+      FROM user_bots 
+      WHERE user_id = $1
+    `, [userId]);
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('Error getting user bot config:', error);
+    return null;
+  }
+}
+
+function formatBusinessHours(businessInfo: any): string {
+  if (!businessInfo?.business_hours) {
+    return 'Consulta nuestros horarios';
+  }
+
+  try {
+    const hours = typeof businessInfo.business_hours === 'string'
+      ? JSON.parse(businessInfo.business_hours)
+      : businessInfo.business_hours;
+
+    const daysTranslation: { [key: string]: string } = {
+      'lunes': 'Lunes',
+      'martes': 'Martes',
+      'miércoles': 'Miércoles',
+      'jueves': 'Jueves',
+      'viernes': 'Viernes',
+      'sábado': 'Sábado',
+      'domingo': 'Domingo'
+    };
+
+    const dayOrder = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+
+    const hoursText = dayOrder
+      .filter(day => hours[day])
+      .map(day => {
+        const time = hours[day];
+        const dayName = daysTranslation[day] || day;
+        
+        if (time.closed) {
+          return `🔴 ${dayName}: Cerrado`;
+        } else if (time.from && time.to) {
+          return `🟢 ${dayName}: ${time.from} - ${time.to}`;
+        }
+        return `${dayName}: Horario no especificado`;
+      }).join('\n');
+
+    return hoursText || 'No tenemos un horario definido.';
+  } catch (error) {
+    console.error('Error parsing business hours:', error);
+    return 'No pudimos cargar los horarios. Por favor, contacta para más información.';
+  }
+}
+
 // Reemplazar variables en un mensaje
 function replaceMessageVariables(message: string, customer: CustomerData | null, businessInfo: any): string {
   let response = message
@@ -142,52 +240,7 @@ function replaceMessageVariables(message: string, customer: CustomerData | null,
     response = response.replace(/{email}/g, businessInfo.email || '')
     response = response.replace(/{website}/g, businessInfo.website || '')
     
-    // Formatear horarios
-    if (businessInfo.business_hours) {
-      try {
-        let hours
-        if (typeof businessInfo.business_hours === 'string') {
-          hours = JSON.parse(businessInfo.business_hours)
-        } else {
-          hours = businessInfo.business_hours
-        }
-        
-        const daysTranslation: { [key: string]: string } = {
-          'monday': 'Lunes',
-          'tuesday': 'Martes', 
-          'wednesday': 'Miércoles',
-          'thursday': 'Jueves',
-          'friday': 'Viernes',
-          'saturday': 'Sábado',
-          'sunday': 'Domingo'
-        }
-        
-        const dayOrder = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-        
-        const hoursText = dayOrder
-          .filter(day => hours[day])
-          .map(day => {
-            const time = hours[day]
-            const dayName = daysTranslation[day] || day
-            
-            if (typeof time === 'object' && time !== null) {
-              const timeObj = time as any
-              if (timeObj.closed) {
-                return `${dayName}: Cerrado`
-              } else if (timeObj.open && timeObj.close) {
-                return `${dayName}: ${timeObj.open} - ${timeObj.close}`
-              }
-            }
-            return `${dayName}: ${time}`
-          }).join('\n')
-        
-        response = response.replace(/{horarios}/g, hoursText)
-      } catch (error) {
-        response = response.replace(/{horarios}/g, 'Consulta nuestros horarios')
-      }
-    } else {
-      response = response.replace(/{horarios}/g, 'Consulta nuestros horarios')
-    }
+    response = response.replace(/{horarios}/g, formatBusinessHours(businessInfo));
   } else {
     // Valores por defecto si no hay businessInfo
     response = response.replace(/{negocio_nombre}/g, 'Nuestro Negocio')
@@ -212,297 +265,88 @@ function formatResponse(response: string, hasOptions = false, options: any[] = [
 }
 
 // Análisis inteligente de intención del mensaje
-function analyzeMessageIntent(messageText: string, messages: any[]): any | null {
-  const text = messageText.toLowerCase().trim()
-  
-  // Mapeo de intenciones semánticas con mayor precisión
+function analyzeMessageIntent(messageText: string): string[] {
+  const text = messageText.toLowerCase().trim();
+  const foundIntents = new Set<string>();
+
   const intentMap: { [key: string]: string[] } = {
-    'saludo': [
-      'hola', 'hello', 'hi', 'buenas', 'buenos dias', 'buenas tardes', 'buenas noches',
-      'saludos', 'que tal', 'como estas', 'hey', 'ola'
-    ],
-    'productos': [
-      'menu', 'carta', 'productos', 'comida', 'platos', 'opciones', 'que tienen',
-      'que venden', 'comer', 'hambre', 'quiero comer', 'disponible', 'ofrecen',
-      'opciones de comida', 'opciones de menu', 'que hay para comer', 'que puedo comer',
-      'platillos', 'especialidades', 'que sirven'
-    ],
-    'horarios': [
-      'horario', 'hora', 'abierto', 'cerrado', 'abren', 'cierran', 'atienden',
-      'que hora', 'a que hora', 'cuando abren', 'cuando cierran', 'funcionan'
-    ],
-    'ubicacion': [
-      'direccion', 'ubicacion', 'donde', 'ubicación', 'localización', 'dirección',
-      'como llego', 'donde estan', 'donde se encuentran', 'localizado'
-    ],
-    'contacto': [
-      'telefono', 'teléfono', 'contacto', 'llamar', 'comunicarse', 'numero',
-      'whatsapp', 'contactar', 'hablar'
-    ],
-    'precios': [
-      'precio', 'costo', 'vale', 'cuesta', 'cobran', 'tarifas', 'cuanto',
-      'cuanto cuesta', 'cuanto vale', 'presupuesto'
-    ],
-    'puntos': [
-      'puntos', 'punto', 'recompensas', 'loyalty', 'saldo', 'acumulados',
-      'tengo', 'mis puntos', 'cuantos puntos'
-    ],
-    'promociones': [
-      'promocion', 'promoción', 'oferta', 'descuento', 'especial', 'rebaja',
-      'deal', 'promo', 'ofertas especiales'
-    ],
-    'despedida': [
-      'gracias', 'bye', 'chau', 'adiós', 'adios', 'hasta luego', 'nos vemos',
-      'muchas gracias', 'perfecto gracias', 'ok gracias'
-    ]
-  }
-  
-  // Buscar coincidencias por intención semántica con mayor prioridad para frases específicas
-  console.log('Analyzing message intent for:', text)
-  
-  // PRIORIDAD 1: Buscar frases específicas de productos/comida primero
-  if (text.includes('opciones de comida') || 
-      text.includes('que tienen') || 
-      text.includes('que hay para comer') ||
-      text.includes('opciones de menu') ||
-      text.includes('que puedo comer') ||
-      (text.includes('opciones') && (text.includes('comida') || text.includes('menu'))) ||
-      (text.includes('que') && text.includes('comida')) ||
-      (text.includes('que') && text.includes('menu'))) {
-    
-    const productMessage = messages.find(m => m.category === 'productos')
-    if (productMessage) {
-      console.log('Priority match found for PRODUCTOS by specific phrase analysis')
-      return productMessage
+    'saludo': ['hola', 'buenas', 'buenos dias', 'buenas tardes', 'hey', 'ola'],
+    'horarios': ['horario', 'hora', 'abierto', 'cerrado', 'abren', 'cierran'],
+    'productos': ['menu', 'carta', 'productos', 'comida', 'platos', 'opciones'],
+    'ubicacion': ['direccion', 'ubicacion', 'donde', 'localización'],
+    'contacto': ['telefono', 'contacto', 'llamar', 'numero', 'whatsapp'],
+    'promociones': ['promocion', 'oferta', 'descuento', 'promo'],
+    'puntos': ['puntos', 'recompensas', 'saldo'],
+    'despedida': ['gracias', 'bye', 'chau', 'adiós'],
+    'info': ['info', 'informacion', 'acerca de', 'quienes son', 'description', 'servicios', 'especialidades']
+  };
+
+  for (const [intent, keywords] of Object.entries(intentMap)) {
+    if (keywords.some(keyword => text.includes(keyword))) {
+      foundIntents.add(intent);
     }
   }
-  
-  // PRIORIDAD 2: Match exacto con palabras clave configuradas
-  for (const msg of messages) {
-    if (msg.trigger_keywords && Array.isArray(msg.trigger_keywords)) {
-      const exactMatch = msg.trigger_keywords.some((keyword: string) => 
-        text.includes(keyword.toLowerCase())
-      )
-      if (exactMatch) {
-        console.log('Exact keyword match found:', msg.category, msg.trigger_keywords)
-        return msg
-      }
-    }
-  }
-  
-  // PRIORIDAD 3: Match semántico por categoría (excluyendo saludo si hay palabras de comida)
-  for (const [intent, words] of Object.entries(intentMap)) {
-    // Si el texto habla de comida, NO activar saludo
-    if (intent === 'saludo' && 
-        (text.includes('comida') || text.includes('menu') || text.includes('opciones'))) {
-      continue
-    }
-    
-    const semanticMatch = words.some(word => 
-      text.includes(word) || 
-      // También buscar palabras relacionadas
-      text.split(' ').some(textWord => word.includes(textWord) && textWord.length > 2)
-    )
-    
-    if (semanticMatch) {
-      const categoryMessage = messages.find(m => m.category === intent)
-      if (categoryMessage) {
-        console.log('Semantic intent match found:', intent, 'triggered by analysis')
-        return categoryMessage
-      }
-    }
-  }
-  
-  return null
+
+  return Array.from(foundIntents);
 }
 
-// Generar respuesta con IA
-async function generateAIResponse(message: string, customer: CustomerData | null, messages: any[], businessInfo: any) {
-  const messageText = message.toLowerCase().trim()
-  
-  console.log('Generating AI response for:', { messageText, messagesCount: messages.length, customer: customer ? 'found' : 'not found' })
-  
-  // PRIMERO: Análisis inteligente de intención
-  const intentMatch = analyzeMessageIntent(messageText, messages)
-  if (intentMatch) {
-    console.log('Intent-based match found:', intentMatch.category)
-    
-    // Reemplazar todas las variables en el mensaje personalizado
-    let response = replaceMessageVariables(intentMatch.message_text, customer, businessInfo)
-    
-    // Si el mensaje tiene opciones, preparar botones interactivos
-    if (intentMatch.has_options && intentMatch.options && Array.isArray(intentMatch.options) && intentMatch.options.length > 0) {
-      const options = intentMatch.options.map((option: any) => ({
-        id: option.id,
-        text: option.text
-      }))
-      
-      console.log('Using intent-based message with interactive buttons:', response, options)
-      return {
-        response,
-        hasOptions: true,
-        options
-      }
-    }
-    
-    console.log('Using intent-based message with variables replaced:', response)
-    return formatResponse(response, false, [])
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+async function generateAIResponse(message: string, customer: CustomerData | null, businessInfo: any, botConfig: any, history: { role: 'user' | 'model'; text: string }[]) {
+  if (!botConfig?.openai_api_key) {
+    return formatResponse('La clave de API para la IA no está configurada.');
   }
 
-  // SEGUNDO: Verificar si es una respuesta a una opción (por ID o número)
-  // Buscar opción por ID primero (botones reales)
-  for (const msg of messages) {
-    if (msg.has_options && msg.options && Array.isArray(msg.options)) {
-      const selectedOption = msg.options.find((option: any) => option.id === messageText)
-      if (selectedOption) {
-        console.log('User selected option by ID:', selectedOption)
-        const response = replaceMessageVariables(selectedOption.response_text, customer, businessInfo)
-        return formatResponse(response, false, [])
-      }
-    }
-  }
-  
-  // Verificar si es una respuesta numérica (fallback para sandbox)
-  const numericChoice = parseInt(messageText.trim())
-  if (!isNaN(numericChoice) && numericChoice > 0) {
-    for (const msg of messages) {
-      if (msg.has_options && msg.options && Array.isArray(msg.options)) {
-        const selectedOption = msg.options[numericChoice - 1]
-        if (selectedOption) {
-          console.log('User selected option by number:', selectedOption)
-          const response = replaceMessageVariables(selectedOption.response_text, customer, businessInfo)
-          return formatResponse(response, false, [])
-        }
-      }
-    }
-  }
-  
-  console.log('No custom message or intent found, using default AI response...')
-  
-  // TERCERO: Si no hay mensaje personalizado, usar IA
-  
-  // 1. SALUDOS
-  if (messageText.includes('hola') || messageText.includes('buenas') || messageText.includes('buenos dias') || messageText.includes('buenas tardes')) {
-    const defaultGreeting = customer 
-      ? `¡Hola ${customer.name}! 👋 Bienvenido/a de nuevo. Tienes ${customer.points} puntos acumulados. ¿En qué puedo ayudarte hoy?`
-      : '¡Hola! 👋 Bienvenido/a a nuestro servicio. ¿En qué puedo ayudarte hoy?'
-    
-    console.log('Using default greeting:', defaultGreeting)
-    return formatResponse(defaultGreeting, false, [])
-  }
-  
-  // 2. CONSULTA DE PUNTOS
-  if (messageText.includes('puntos') || messageText.includes('punto')) {
-    if (customer) {
-      return formatResponse(`Tienes ${customer.points} puntos acumulados 🎯\n\nCon tus puntos puedes canjear:\n- 100 puntos = 10% descuento\n- 200 puntos = 20% descuento\n- 500 puntos = Producto gratis\n\n¿Te gustaría canjear tus puntos?`)
-    }
-    return formatResponse('Para consultar tus puntos necesitamos que te registres. ¿Podrías compartir tu nombre y email?')
-  }
-  
-  // 3. MENÚ Y PRODUCTOS
-  if (messageText.includes('menu') || messageText.includes('carta') || messageText.includes('productos') || messageText.includes('comida') || messageText.includes('platos') || messageText.includes('opciones')) {
-    // Primero verificar si hay un mensaje personalizado para menú
-    const menuMsg = messages.find(m => m.category === 'menu')
-    if (menuMsg) return formatResponse(menuMsg.message_text)
-    
-    // Si hay enlace del menú configurado, enviarlo
-    if (businessInfo && businessInfo.menu_link) {
-      return formatResponse(`🍽️ *Aquí tienes nuestro menú completo:*
+  const genAI = new GoogleGenerativeAI(botConfig.openai_api_key);
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash"});
 
-${businessInfo.menu_link}
+  const isFirstInteraction = history.length <= 1;
 
-¡Echa un vistazo a todas nuestras deliciosas opciones! ¿Hay algo específico que te interese?`)
-    }
-    
-    // Respuesta por defecto si no hay enlace configurado
-    return formatResponse(`🍽️ *Nuestro menú incluye:*
+  // --- Construcción del Prompt para la IA ---
+  let prompt = `**Rol y Tarea Principal:**\n`;
+  prompt += `Eres ${botConfig.bot_name || 'un asistente virtual'} para el restaurante llamado ${businessInfo.business_name}. Tu rol es ser ${botConfig.ai_role || 'amigable y eficiente'}.\n`;
+  prompt += `Tu tarea es responder a las preguntas del cliente de forma concisa, usando la información de contexto que te proporciono. Añade emojis para que tus respuestas sean más amigables.\n\n`;
 
-🍔 Hamburguesas - $15
-🍕 Pizzas - $20  
-🥗 Ensaladas - $12
-🍟 Papas fritas - $8
-🥤 Bebidas - $5
+  prompt += `**Reglas Estrictas:**\n`;
+  prompt += `1.  Si la conversación ya ha comenzado (no es la primera interacción), NO saludes de nuevo. Ve directo a la respuesta.\n`;
+  prompt += `2.  Responde ÚNICAMENTE a lo que el cliente pregunta. No añadas información que no te hayan solicitado (como la dirección, si solo preguntan por el horario).\n`;
+  prompt += `3.  Si no tienes la información para algo específico (ej. el horario de un día), simplemente di que no está disponible. NO inventes respuestas ni sugieras llamar por teléfono.\n\n`;
 
-¿Qué te gustaría ordenar?`)
+  prompt += `**Contexto del Negocio (${businessInfo.business_name}):**\n`;
+  if (businessInfo.description) prompt += `- Descripción: ${businessInfo.description}\n`;
+  if (businessInfo.address) prompt += `- Dirección: ${businessInfo.address}\n`;
+  if (businessInfo.phone) prompt += `- Teléfono: ${businessInfo.phone}\n`;
+  // Filtro de seguridad para no exponer URLs locales
+  if (businessInfo.website && !businessInfo.website.includes('localhost')) {
+    prompt += `- Sitio Web: ${businessInfo.website}\n`;
   }
-  
-  // 4. HORARIOS
-  if (messageText.includes('horario') || messageText.includes('hora') || messageText.includes('abierto') || messageText.includes('cerrado')) {
-    if (businessInfo && businessInfo.business_hours) {
-      try {
-        let hours
-        if (typeof businessInfo.business_hours === 'string') {
-          hours = JSON.parse(businessInfo.business_hours)
-        } else {
-          hours = businessInfo.business_hours
-        }
-        
-        // Traducir días al español
-        const daysTranslation: { [key: string]: string } = {
-          'monday': 'Lunes',
-          'tuesday': 'Martes', 
-          'wednesday': 'Miércoles',
-          'thursday': 'Jueves',
-          'friday': 'Viernes',
-          'saturday': 'Sábado',
-          'sunday': 'Domingo'
-        }
-        
-        // Ordenar días de la semana
-        const dayOrder = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-        
-        const hoursText = dayOrder
-          .filter(day => hours[day]) // Solo incluir días que existen
-          .map(day => {
-            const time = hours[day]
-            const dayName = daysTranslation[day] || day
-            
-            // Si time es un objeto, formatearlo correctamente
-            if (typeof time === 'object' && time !== null) {
-              const timeObj = time as any
-              if (timeObj.closed) {
-                return `🔴 ${dayName}: Cerrado`
-              } else if (timeObj.open && timeObj.close) {
-                return `🟢 ${dayName}: ${timeObj.open} - ${timeObj.close}`
-              }
-            }
-            // Si time es string, usarlo directamente
-            return `🟢 ${dayName}: ${time}`
-          }).join('\n')
-        
-        return formatResponse(`📅 *HORARIOS DE ATENCIÓN:*
+  if (businessInfo.menu_link) prompt += `- Link del Menú: ${businessInfo.menu_link}\n`;
+  prompt += `- Horarios: ${formatBusinessHours(businessInfo)}\n`;
+  if (businessInfo.services) prompt += `- Servicios: ${businessInfo.services.join(', ')}\n`;
+  if (businessInfo.specialties) prompt += `- Especialidades: ${businessInfo.specialties.join(', ')}\n`;
+  prompt += `\n`;
 
-${hoursText}
+  if (customer) {
+    prompt += `**Contexto del Cliente:**\n- Nombre: ${customer.name}\n- Puntos Acumulados: ${customer.points}\n\n`;
+  }
 
-¿En qué más puedo ayudarte?`)
-      } catch (error) {
-        console.error('Error parsing business hours:', error)
-        return formatResponse('Estamos abiertos de Lunes a Domingo de 9:00 AM a 10:00 PM. ¿En qué más puedo ayudarte?')
-      }
-    }
-    return formatResponse('Estamos abiertos de Lunes a Domingo de 9:00 AM a 10:00 PM. ¿En qué más puedo ayudarte?')
+  // --- Historial de Conversación ---
+  const chatHistory = history.slice(0, -1).map(h => `${h.role === 'user' ? 'Cliente' : 'Tú'}: ${h.text}`).join('\n');
+  prompt += `**Conversación hasta ahora:**\n${chatHistory}\n\n`;
+
+  // --- Tarea Actual ---
+  prompt += `**Pregunta del cliente:**\n"${message}"\n\n`;
+  prompt += `**Tu respuesta (concisa y amigable):**`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    return formatResponse(text);
+  } catch (error) {
+    console.error('Error generating AI response:', error);
+    return formatResponse('Lo siento, no pude procesar tu solicitud en este momento.');
   }
-  
-  // 5. UBICACIÓN
-  if (messageText.includes('direccion') || messageText.includes('ubicacion') || messageText.includes('donde') || messageText.includes('ubicación')) {
-    if (businessInfo && businessInfo.address) {
-      return formatResponse(`Nuestra dirección es: ${businessInfo.address}\n\n¿Necesitas indicaciones para llegar?`)
-    }
-    return formatResponse('Estamos ubicados en el centro de la ciudad. ¿Te gustaría que te envíe la ubicación exacta?')
-  }
-  
-  // 6. DESPEDIDA
-  if (messageText.includes('gracias') || messageText.includes('bye') || messageText.includes('chau') || messageText.includes('adiós')) {
-    const farewellMsg = messages.find(m => m.category === 'farewell')
-    if (farewellMsg) return formatResponse(farewellMsg.message_text)
-    return formatResponse('¡Gracias por contactarnos! 😊 Que tengas un excelente día. ¡Esperamos verte pronto!')
-  }
-  
-  // 7. RESPUESTA PREDETERMINADA
-  const defaultMsg = messages.find(m => m.category === 'default')
-  if (defaultMsg) return formatResponse(defaultMsg.message_text)
-  
-  return formatResponse('Gracias por tu mensaje. Un representante te contactará pronto. Mientras tanto, puedes escribir "menu" para ver nuestros productos o "puntos" para consultar tu saldo.')
 }
 
 // Registrar interacción del chatbot

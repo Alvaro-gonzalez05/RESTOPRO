@@ -29,6 +29,7 @@ interface Message {
   timestamp: Date
   isFromBot: boolean
   isAI?: boolean
+  role?: 'user' | 'model' // Add role property
 }
 
 interface Conversation {
@@ -177,46 +178,85 @@ export default function ChatbotWidget({ userId, isOpen, onClose }: ChatbotProps)
     loadConversationMessages(conversationId)
   }
 
-  const simulateAIResponse = async () => {
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null)
+
+  const handleNewMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const message = e.target.value
+    setNewMessage(message)
+
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current)
+    }
+
+    debounceTimeout.current = setTimeout(() => {
+      if (message.trim() !== '') {
+        // Aquí podrías mostrar un indicador de "escribiendo..." si quisieras
+      }
+    }, 500)
+  }
+
+  const sendTestMessage = async () => {
     if (!newMessage.trim()) return
 
+    const messageToSend = newMessage
+    setNewMessage('')
     setIsLoading(true)
+
     try {
-      // Simulate user message
+      // Añadir mensaje del usuario a la UI
       const userMessage: Message = {
         id: Date.now(),
-        text: newMessage,
+        text: messageToSend,
         timestamp: new Date(),
-        isFromBot: false
+        isFromBot: false,
+        role: 'user'
       }
       setMessages(prev => [...prev, userMessage])
 
-      // Simulate AI response
-      setTimeout(() => {
-        const aiResponses = [
-          "¡Hola! Gracias por contactarnos. ¿En qué puedo ayudarte hoy?",
-          "Te ayudo con eso. Nuestro menú está disponible en nuestra página web.",
-          "Nuestro horario de atención es de Lunes a Viernes de 8:00 AM a 10:00 PM.",
-          "¿Te gustaría información sobre nuestras promociones actuales?",
-          "Para reservas, puedes llamarnos o escribirnos por WhatsApp."
-        ]
+      // Llamar al nuevo endpoint de la API
+      const response = await fetch('/api/chatbot/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          message: messageToSend,
+          from: 'test-chat-widget' // Identificador para el chat de prueba
+        })
+      })
 
-        const randomResponse = aiResponses[Math.floor(Math.random() * aiResponses.length)]
-        
+      if (response.ok) {
+        const data = await response.json()
         const aiMessage: Message = {
           id: Date.now() + 1,
-          text: randomResponse,
+          text: data.response,
           timestamp: new Date(),
           isFromBot: true,
-          isAI: true
+          isAI: true,
+          role: 'model'
         }
         setMessages(prev => [...prev, aiMessage])
-        setIsLoading(false)
-      }, 1000)
-
-      setNewMessage('')
+      } else {
+        const errorData = await response.json()
+        const errorMessage: Message = {
+          id: Date.now() + 1,
+          text: `Error: ${errorData.error || 'No se pudo obtener respuesta.'}`,
+          timestamp: new Date(),
+          isFromBot: true,
+          isAI: false,
+          role: 'model'
+        }
+        setMessages(prev => [...prev, errorMessage])
+      }
     } catch (error) {
-      console.error('Error with AI response:', error)
+      console.error('Error sending test message:', error)
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        text: 'Error: No se pudo conectar con el servidor.',
+        timestamp: new Date(),
+        isFromBot: true,
+        isAI: false
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
       setIsLoading(false)
     }
   }
@@ -275,8 +315,8 @@ export default function ChatbotWidget({ userId, isOpen, onClose }: ChatbotProps)
             </TabsList>
 
             <TabsContent value="chat" className="flex-1 flex flex-col p-4">
-              <div className="flex-1 flex flex-col">
-                <ScrollArea className="flex-1 mb-4 border rounded-lg p-3 min-h-[300px]">
+              <div className="flex-1 flex flex-col min-h-0">
+                <ScrollArea className="flex-1 mb-4 border rounded-lg p-3">
                   {messages.length === 0 ? (
                     <div className="text-center text-gray-500 py-8">
                       <Bot className="h-12 w-12 mx-auto mb-3 text-gray-300" />
@@ -353,7 +393,7 @@ export default function ChatbotWidget({ userId, isOpen, onClose }: ChatbotProps)
                 <div className="flex gap-2">
                   <Input
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
+                    onChange={handleNewMessageChange}
                     placeholder="Escribe un mensaje..."
                     onKeyPress={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -361,14 +401,13 @@ export default function ChatbotWidget({ userId, isOpen, onClose }: ChatbotProps)
                         if (selectedConversation) {
                           sendMessage()
                         } else {
-                          simulateAIResponse()
+                          sendTestMessage()
                         }
                       }
                     }}
-                    disabled={isLoading}
                   />
                   <Button
-                    onClick={selectedConversation ? sendMessage : simulateAIResponse}
+                    onClick={selectedConversation ? sendMessage : sendTestMessage}
                     disabled={isLoading || !newMessage.trim()}
                     size="sm"
                     className="bg-green-600 hover:bg-green-700"
@@ -423,7 +462,7 @@ export default function ChatbotWidget({ userId, isOpen, onClose }: ChatbotProps)
                           </p>
                           <div className="flex items-center gap-1 text-xs text-gray-500">
                             <Clock className="h-3 w-3" />
-                            {format(new Date(conversation.lastMessageTimestamp), 'dd/MM HH:mm', { locale: es })}
+                            {format(new Date(conversation.lastMessageTimestamp && !isNaN(new Date(conversation.lastMessageTimestamp).getTime()) ? conversation.lastMessageTimestamp : new Date()), 'dd/MM HH:mm', { locale: es })}
                           </div>
                         </div>
                       ))}

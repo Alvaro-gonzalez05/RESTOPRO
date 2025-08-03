@@ -12,7 +12,7 @@ export async function getWhatsAppConnection(userId: number) {
     const connection = await sql(`
       SELECT * FROM whatsapp_connections WHERE user_id = $1
     `, [userId])
-    console.log("getWhatsAppConnection result for userId", userId, ":", connection[0]);
+    
     return connection[0] || null
   } catch (error) {
     console.error('Error getting WhatsApp connection:', error)
@@ -53,7 +53,7 @@ export async function connectWhatsApp(userId: number) {
     const openaiApiKey = userBotConfig.length > 0 ? userBotConfig[0].openai_api_key : undefined
 
     const instance = await WhatsAppBotManager.createBotInstance(userId, openaiApiKey)
-    console.log("connectWhatsApp instance result (server action):", { status: instance.status, qrCode: instance.qrCode ? instance.qrCode.substring(0, 50) + '...' : null, userId: instance.userId, phoneNumber: instance.phoneNumber });
+    
     
     revalidatePath('/dashboard/chatbot')
     return { success: true, data: { status: instance.status, qr_code: instance.qrCode, user_id: instance.userId, phone_number: instance.phoneNumber } }
@@ -140,6 +140,19 @@ export async function getBusinessInfo(userId: number) {
     return info[0] || null
   } catch (error) {
     console.error('Error getting business info:', error)
+    return null
+  }
+}
+
+export async function getUserBotConfig(userId: number) {
+  try {
+    const config = await sql(`
+      SELECT * FROM user_bots WHERE user_id = $1
+    `, [userId])
+
+    return config[0] || null
+  } catch (error) {
+    console.error('Error getting user bot config:', error)
     return null
   }
 }
@@ -438,13 +451,13 @@ export async function deleteAutomationRule(id: number) {
 }
 
 export async function saveUserBotConfig(userId: number, config: {
-  botName?: string
-  aiEnabled?: boolean
-  aiRole?: string
-  aiInstructions?: string
-  openaiApiKey?: string
+  bot_name?: string
+  ai_enabled?: boolean
+  ai_role?: string
+  ai_instructions?: string
+  openai_api_key?: string
 }) {
-  console.log("saveUserBotConfig called with userId:", userId, "and config:", config);
+  
   try {
     const result = await sql(`
       INSERT INTO user_bots (
@@ -453,17 +466,19 @@ export async function saveUserBotConfig(userId: number, config: {
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (user_id) 
       DO UPDATE SET 
-        bot_name = COALESCE($2, user_bots.bot_name),
-        ai_enabled = COALESCE($3, user_bots.ai_enabled),
-        ai_role = COALESCE($4, user_bots.ai_role),
-        ai_instructions = COALESCE($5, user_bots.ai_instructions),
-        openai_api_key = COALESCE($6, user_bots.openai_api_key),
+        bot_name = CASE WHEN $2 IS NOT NULL THEN $2 ELSE user_bots.bot_name END,
+        ai_enabled = CASE WHEN $3 IS NOT NULL THEN $3 ELSE user_bots.ai_enabled END,
+        ai_role = CASE WHEN $4 IS NOT NULL THEN $4 ELSE user_bots.ai_role END,
+        ai_instructions = CASE WHEN $5 IS NOT NULL THEN $5 ELSE user_bots.ai_instructions END,
+        openai_api_key = CASE WHEN $6 IS NOT NULL THEN $6 ELSE user_bots.openai_api_key END,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
     `, [
-      userId, config.botName, config.aiEnabled, config.aiRole, config.aiInstructions, config.openaiApiKey
+      userId, config.bot_name, config.ai_enabled, config.ai_role, config.ai_instructions, config.openai_api_key
     ])
-    console.log("saveUserBotConfig SQL result:", result);
+
+    revalidatePath('/dashboard/chatbot') // Invalidar el caché
+    
     return { success: true, config: result[0] }
   } catch (error) {
     console.error('Error saving user bot config:', error)
