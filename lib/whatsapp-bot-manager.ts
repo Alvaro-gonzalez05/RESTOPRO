@@ -171,18 +171,31 @@ export class WhatsAppBotManager {
         [userId]
       );
 
-      
-
       const config = botConfig[0];
-      
 
-      const predefinedResponse = await this.findPredefinedResponse(userId, message);
-      
-
+      // Try enhanced chatbot first if AI is enabled
       if (config.ai_enabled && generativeAI) {
+        try {
+          // Import enhanced chatbot function
+          const { processIncomingMessageEnhanced } = await import('@/app/actions/enhanced-chatbot-ai');
+          const result = await processIncomingMessageEnhanced(userId, from, message);
+          
+          if (result.success && result.response) {
+            return result.response;
+          }
+        } catch (enhancedError) {
+          console.log('Enhanced chatbot failed, falling back to basic AI:', enhancedError);
+        }
+
+        // Fallback to basic AI response
         return await this.getAIResponse(message, config.ai_role, config.ai_instructions, generativeAI, history);
       }
 
+      // Check for predefined responses if AI is disabled
+      const predefinedResponse = await this.findPredefinedResponse(userId, message);
+      if (predefinedResponse) {
+        return predefinedResponse;
+      }
       
       return 'Gracias por tu mensaje. En breve te responderemos.';
     } catch (error) {

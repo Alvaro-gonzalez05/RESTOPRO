@@ -32,6 +32,9 @@ import {
 
 import { BusinessInfo } from './business-info'
 import { BotConfigForm } from './bot-config-form'
+import { MensajesSection } from './mensajes-section'
+import { PromocionesSection } from './promociones-section'
+import { AutomatizacionSection } from './automatizacion-section'
 
 // Tipos para evitar 'any'
 interface Connection {
@@ -241,15 +244,14 @@ export function ChatbotDashboardClient({ initialConnection, userId, businessInfo
           </Card>
         )
       case 'Mensajes':
-        return <div className="p-6"><h2 className="text-xl font-bold">Sección de Mensajes en construcción</h2></div>
+        return <MensajesSection />
       case 'Mi Negocio':
         return <BusinessInfo businessInfo={businessInfo} />
       case 'Promociones':
-        return <div className="p-6"><h2 className="text-xl font-bold">Sección de Promociones en construcción</h2></div>
+        return <PromocionesSection />
       case 'Automatización':
-        return <div className="p-6"><h2 className="text-xl font-bold">Sección de Automatización en construcción</h2></div>
+        return <AutomatizacionSection />
       case 'Mi Bot':
-        case 'Mi Bot':
         return <BotConfigForm userId={userId} initialConfig={userBotConfig} />
       default:
         return null

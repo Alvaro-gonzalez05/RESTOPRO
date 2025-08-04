@@ -451,11 +451,11 @@ export async function deleteAutomationRule(id: number) {
 }
 
 export async function saveUserBotConfig(userId: number, config: {
-  bot_name?: string
-  ai_enabled?: boolean
-  ai_role?: string
-  ai_instructions?: string
-  openai_api_key?: string
+  botName?: string
+  aiEnabled?: boolean
+  aiRole?: string
+  aiInstructions?: string
+  openaiApiKey?: string
 }) {
   
   try {
@@ -466,18 +466,16 @@ export async function saveUserBotConfig(userId: number, config: {
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (user_id) 
       DO UPDATE SET 
-        bot_name = CASE WHEN $2 IS NOT NULL THEN $2 ELSE user_bots.bot_name END,
-        ai_enabled = CASE WHEN $3 IS NOT NULL THEN $3 ELSE user_bots.ai_enabled END,
-        ai_role = CASE WHEN $4 IS NOT NULL THEN $4 ELSE user_bots.ai_role END,
-        ai_instructions = CASE WHEN $5 IS NOT NULL THEN $5 ELSE user_bots.ai_instructions END,
-        openai_api_key = CASE WHEN $6 IS NOT NULL THEN $6 ELSE user_bots.openai_api_key END,
+        bot_name = COALESCE($2, user_bots.bot_name),
+        ai_enabled = COALESCE($3, user_bots.ai_enabled),
+        ai_role = COALESCE($4, user_bots.ai_role),
+        ai_instructions = COALESCE($5, user_bots.ai_instructions),
+        openai_api_key = COALESCE($6, user_bots.openai_api_key),
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
     `, [
-      userId, config.bot_name, config.ai_enabled, config.ai_role, config.ai_instructions, config.openai_api_key
+      userId, config.botName, config.aiEnabled, config.aiRole, config.aiInstructions, config.openaiApiKey
     ])
-
-    revalidatePath('/dashboard/chatbot') // Invalidar el caché
     
     return { success: true, config: result[0] }
   } catch (error) {

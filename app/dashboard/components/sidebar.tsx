@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, ShoppingCart, Menu, Package, Settings, LogOut, User, Utensils, Receipt, Truck, MessageCircle } from "lucide-react"
+import { LayoutDashboard, ShoppingCart, Menu, Package, Settings, LogOut, User, Utensils, Receipt, Truck, MessageCircle, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { logoutAction } from "@/app/actions/auth"
 import type { User as AdminUser } from "@/lib/types"
@@ -14,6 +14,7 @@ interface SidebarProps {
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Órdenes", href: "/dashboard/ordenes", icon: ShoppingCart },
+  { name: "Reservas", href: "/dashboard/reservas", icon: Calendar },
   { name: "Menú", href: "/dashboard/menu", icon: Menu },
   { name: "Productos", href: "/dashboard/productos", icon: Package },
   { name: "Clientes", href: "/dashboard/clientes", icon: User },
